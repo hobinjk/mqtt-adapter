@@ -7,4 +7,5 @@ authors = ["James Hobin <hobinjk@gmail.com>"]
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
+mqtt3 = "0.1"
 nanomsg = "0.6"

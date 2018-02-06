@@ -1,14 +1,18 @@
+extern crate mqtt3;
 extern crate nanomsg;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Write, BufReader, BufWriter};
+use std::net::TcpStream;
+use std::sync::Arc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
 use std::time::Duration;
 
+use mqtt3::{MqttRead, MqttWrite};
 use nanomsg::{Protocol, Socket};
 use serde_json::{Map, Value};
 
@@ -232,11 +236,37 @@ impl Device {
             props: HashMap::new()
         }
     }
+
+    fn set_property(&mut self, property: Property) -> Result<(), io::Error> {
+        println!("set_property");
+        self.props.insert(property.name, property.value);
+        Ok(())
+    }
 }
 
 struct Adapter {
     id: String,
     devices: HashMap<String, Device>
+}
+
+impl Adapter {
+    fn start_pairing(&mut self) -> Result<(), io::Error> {
+        println!("start_pairing");
+        Ok(())
+    }
+
+    fn cancel_pairing(&mut self) -> Result<(), io::Error> {
+        println!("cancel_pairing");
+        Ok(())
+    }
+
+    fn set_property(&mut self, device_id: &str, property: Property) -> Result<(), io::Error> {
+        println!("set_property");
+        match self.devices.get_mut(device_id) {
+            Some(device) => device.set_property(property),
+            None => Err(io::Error::new(io::ErrorKind::Other, "Device not found"))
+        }
+    }
 }
 
 struct Plugin {
@@ -256,7 +286,7 @@ impl Plugin {
         }
     }
 
-    fn handle_msg(&self, msg: GatewayMessage) -> Result<(), io::Error> {
+    fn handle_msg(&mut self, msg: GatewayMessage) -> Result<(), io::Error> {
         match msg {
             GatewayMessage::SetProperty {
                 plugin_id,
@@ -268,8 +298,10 @@ impl Plugin {
                     return Ok(())
                 }
 
-                let adapter = &self.adapters[&adapter_id];
-                adapter.set_property(device_id, property)
+                match self.adapters.get_mut(&adapter_id) {
+                    Some(adapter) => adapter.set_property(&device_id, property),
+                    None => Err(io::Error::new(io::ErrorKind::Other, "Adapter not found"))
+                }
             },
             GatewayMessage::UnloadPlugin {..} => {
                 Ok(())
@@ -286,8 +318,10 @@ impl Plugin {
                     return Ok(())
                 }
 
-                let adapter = &self.adapters[&adapter_id];
-                adapter.start_pairing()
+                match self.adapters.get_mut(&adapter_id) {
+                    Some(adapter) => adapter.start_pairing(),
+                    None => Err(io::Error::new(io::ErrorKind::Other, "Adapter not found")),
+                }
             },
             GatewayMessage::CancelPairing {
                 plugin_id,
@@ -297,8 +331,10 @@ impl Plugin {
                     return Ok(())
                 }
 
-                let adapter = &self.adapters[&adapter_id];
-                adapter.cancel_pairing()
+                match self.adapters.get_mut(&adapter_id) {
+                    Some(adapter) => adapter.cancel_pairing(),
+                    None => Err(io::Error::new(io::ErrorKind::Other, "Adapter not found")),
+                }
             },
             GatewayMessage::RemoveThing { .. } => {
                 Ok(())
@@ -322,13 +358,67 @@ impl Plugin {
     }
 }
 
+struct MQTT {
+    writer: BufWriter<TcpStream>,
+    reader: BufReader<TcpStream>,
+    username: String,
+    password: String,
+}
+
+const ADAFRUIT_IO: &'static str = "io.adafruit.com:1883";
+
+impl MQTT {
+    fn new() -> MQTT {
+        let stream = TcpStream::connect(ADAFRUIT_IO).unwrap();
+        let reader = BufReader::new(stream.try_clone().unwrap());
+        let writer = BufWriter::new(stream.try_clone().unwrap());
+        MQTT {
+            reader,
+            writer,
+            username: "username".to_string(),
+            password: "password".to_string()
+        }
+    }
+
+    fn send_connect(&mut self) -> Result<mqtt3::Packet, mqtt3::Error> {
+        let connect = mqtt3::Packet::Connect(Box::new(mqtt3::Connect {
+            protocol: mqtt3::Protocol::MQTT(4),
+            keep_alive: 30,
+            client_id: "rust-mq-example-pub".to_string(),
+            clean_session: true,
+            last_will: None,
+            username: Some(self.username.clone()),
+            password: Some(self.password.clone()),
+        }));
+        println!("{:?}", connect);
+        self.writer.write_packet(&connect);
+        self.writer.flush();
+        self.reader.read_packet()
+    }
+
+    fn publish_value(&mut self, value: bool) -> Result<mqtt3::Packet, mqtt3::Error> {
+		let publish = mqtt3::Packet::Publish(Box::new(mqtt3::Publish {
+			dup: false,
+			qos: mqtt3::QoS::AtLeastOnce,
+			retain: false,
+			topic_name: "hobinjk/feeds/onoff".to_owned(),
+			pid: Some(mqtt3::PacketIdentifier(10)),
+			payload: Arc::new("true".to_string().into_bytes())
+		}));
+		println!("{:?}", publish);
+		self.writer.write_packet(&publish);
+		self.writer.flush();
+		self.reader.read_packet()
+    }
+}
+
 fn main() {
-    let (mut gateway_bridge, msg_sender, msg_receiver) = GatewayBridge::new("mqtt");
-    thread::spawn(move || {
-        gateway_bridge.run_forever().unwrap();
-    });
-    let mut plugin = Plugin::new("mqtt", msg_sender, msg_receiver);
-    plugin.run_forever().unwrap();
+    // let (mut gateway_bridge, msg_sender, msg_receiver) = GatewayBridge::new("mqtt");
+    // thread::spawn(move || {
+    //     gateway_bridge.run_forever().unwrap();
+    // });
+    // let mut plugin = Plugin::new("mqtt", msg_sender, msg_receiver);
+    // plugin.run_forever().unwrap();
 
     // let adapters = map from id to adapter
     // select (nanomsg, paired bridges channel)
@@ -343,4 +433,7 @@ fn main() {
     //     bri: 255
     // };
     // let _ = adapters[0].send_properties(light_id, props).unwrap();
+    let mut mqtt = MQTT::new();
+    println!("con: {:?}", mqtt.send_connect().unwrap());
+    println!("pub: {:?}", mqtt.publish_value(false).unwrap());
 }
