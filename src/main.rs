@@ -5,19 +5,19 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write, BufReader, BufWriter};
-use std::net::TcpStream;
-use std::sync::Arc;
+use std::io::{self, Read, Write};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
 use std::time::Duration;
 
-use mqtt3::{MqttRead, MqttWrite};
 use nanomsg::{Protocol, Socket};
 use serde_json::{Map, Value};
 
 const BASE_URL: &'static str = "ipc:///tmp";
 const ADAPTER_MANAGER_URL: &'static str = "ipc:///tmp/gateway.addonManager";
+
+mod mqtt;
+
 
 #[derive(Serialize)]
 #[serde(tag = "messageType", content = "data", rename_all = "camelCase")]
@@ -358,60 +358,6 @@ impl Plugin {
     }
 }
 
-struct MQTT {
-    writer: BufWriter<TcpStream>,
-    reader: BufReader<TcpStream>,
-    username: String,
-    password: String,
-}
-
-const ADAFRUIT_IO: &'static str = "io.adafruit.com:1883";
-
-impl MQTT {
-    fn new() -> MQTT {
-        let stream = TcpStream::connect(ADAFRUIT_IO).unwrap();
-        let reader = BufReader::new(stream.try_clone().unwrap());
-        let writer = BufWriter::new(stream.try_clone().unwrap());
-        MQTT {
-            reader,
-            writer,
-            username: "username".to_string(),
-            password: "password".to_string()
-        }
-    }
-
-    fn send_connect(&mut self) -> Result<mqtt3::Packet, mqtt3::Error> {
-        let connect = mqtt3::Packet::Connect(Box::new(mqtt3::Connect {
-            protocol: mqtt3::Protocol::MQTT(4),
-            keep_alive: 30,
-            client_id: "rust-mq-example-pub".to_string(),
-            clean_session: true,
-            last_will: None,
-            username: Some(self.username.clone()),
-            password: Some(self.password.clone()),
-        }));
-        println!("{:?}", connect);
-        self.writer.write_packet(&connect);
-        self.writer.flush();
-        self.reader.read_packet()
-    }
-
-    fn publish_value(&mut self, value: bool) -> Result<mqtt3::Packet, mqtt3::Error> {
-		let publish = mqtt3::Packet::Publish(Box::new(mqtt3::Publish {
-			dup: false,
-			qos: mqtt3::QoS::AtLeastOnce,
-			retain: false,
-			topic_name: "hobinjk/feeds/onoff".to_owned(),
-			pid: Some(mqtt3::PacketIdentifier(10)),
-			payload: Arc::new("true".to_string().into_bytes())
-		}));
-		println!("{:?}", publish);
-		self.writer.write_packet(&publish);
-		self.writer.flush();
-		self.reader.read_packet()
-    }
-}
-
 fn main() {
     // let (mut gateway_bridge, msg_sender, msg_receiver) = GatewayBridge::new("mqtt");
     // thread::spawn(move || {
@@ -433,7 +379,7 @@ fn main() {
     //     bri: 255
     // };
     // let _ = adapters[0].send_properties(light_id, props).unwrap();
-    let mut mqtt = MQTT::new();
+    let mut mqtt = mqtt::MQTT::new();
     println!("con: {:?}", mqtt.send_connect().unwrap());
-    println!("pub: {:?}", mqtt.publish_value(false).unwrap());
+    println!("pub: {:?}", mqtt.publish_value("on", Value::Bool(true)).unwrap());
 }
