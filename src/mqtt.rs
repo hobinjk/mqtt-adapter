@@ -43,7 +43,7 @@ impl MQTT {
         self.reader.read_packet()
     }
 
-    pub fn publish_value(&mut self, prop: &str, value: Value) -> Result<mqtt3::Packet, mqtt3::Error> {
+    pub fn publish_value(&mut self, prop: &str, value: &Value) -> Result<mqtt3::Packet, mqtt3::Error> {
 		let publish = mqtt3::Packet::Publish(Box::new(mqtt3::Publish {
 			dup: false,
 			qos: mqtt3::QoS::AtLeastOnce,
