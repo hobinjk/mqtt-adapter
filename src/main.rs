@@ -16,15 +16,13 @@ mod gateway;
 use gateway::{Device, Adapter, Plugin, GatewayBridge, Property};
 
 struct MQTTDevice {
-    id: String,
     props: HashMap<String, Value>,
     mqtt: mqtt::MQTT
 }
 
 impl MQTTDevice {
-    fn new(id: &str, mqtt: mqtt::MQTT) -> MQTTDevice {
+    fn new(mqtt: mqtt::MQTT) -> MQTTDevice {
         MQTTDevice {
-            id: id.to_string(),
             props: HashMap::new(),
             mqtt: mqtt
         }
@@ -42,7 +40,6 @@ impl Device for MQTTDevice {
 }
 
 struct MQTTAdapter {
-    id: String,
     devices: HashMap<String, Box<MQTTDevice>>
 }
 
@@ -50,9 +47,8 @@ impl MQTTAdapter {
     fn new(id: &str, mqtt: mqtt::MQTT) -> MQTTAdapter {
         let mut devices = HashMap::new();
         let device_id = format!("{}-0", id);
-        devices.insert(device_id.to_string(), Box::new(MQTTDevice::new(&device_id, mqtt)));
+        devices.insert(device_id.to_string(), Box::new(MQTTDevice::new(mqtt)));
         MQTTAdapter {
-            id: id.to_string(),
             devices: devices
         }
     }

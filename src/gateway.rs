@@ -352,7 +352,7 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                 plugin_id: self.id.clone(),
                 adapter_id: adapter_id.clone(),
                 name: adapter.get_name()
-            });
+            }).map_err(to_io_error)?;
             for (device_id, device) in adapter.get_devices() {
                 self.sender.send(PluginMessage::HandleDeviceAdded {
                     plugin_id: self.id.clone(),
@@ -362,7 +362,7 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                     typ: device.get_type(),
                     actions: device.get_actions(),
                     properties: device.get_properties(),
-                });
+                }).map_err(to_io_error)?;
             }
         }
 
