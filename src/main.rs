@@ -22,20 +22,43 @@ struct MQTTDevice {
 
 impl MQTTDevice {
     fn new(mqtt: mqtt::MQTT) -> MQTTDevice {
+        let mut props = HashMap::new();
+        props.insert("on".to_string(), Value::Bool(true));
+
         MQTTDevice {
-            props: HashMap::new(),
+            props: props,
             mqtt: mqtt
         }
     }
+
 }
 
 impl Device for MQTTDevice {
     fn set_property(&mut self, property: Property) -> Result<Property, io::Error> {
-        println!("set_property");
+        println!("set_property {:?}", property);
         self.mqtt.publish_value(&property.name, &property.value)
             .map_err(|_| return io::Error::new(io::ErrorKind::Other, "mqtt3 error"))?;
         self.props.insert(property.name.clone(), property.value.clone());
         Ok(property)
+    }
+
+    fn get_properties(&self) -> HashMap<String, Property> {
+        let mut props = HashMap::new();
+        for (name, value) in &self.props {
+            props.insert(name.clone(), Property {
+                name: name.clone(),
+                value: value.clone()
+            });
+        }
+        props
+    }
+
+    fn get_name(&self) -> String {
+        "ESP8266 LED".to_string()
+    }
+
+    fn get_type(&self) -> String {
+        "onOffSwitch".to_string()
     }
 }
 
