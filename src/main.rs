@@ -58,7 +58,7 @@ impl MQTTAdapter {
     }
 }
 
-impl Adapter for MQTTAdapter {
+impl Adapter<MQTTDevice> for MQTTAdapter {
     fn start_pairing(&mut self) -> Result<(), io::Error> {
         println!("start_pairing");
         Ok(())
@@ -75,6 +75,14 @@ impl Adapter for MQTTAdapter {
             Some(device) => device.set_property(property),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Device not found"))
         }
+    }
+
+    fn get_name(&self) -> String {
+        "MQTT Adapter".to_string()
+    }
+
+    fn get_devices(&self) -> &HashMap<String, Box<MQTTDevice>> {
+        &self.devices
     }
 }
 

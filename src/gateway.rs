@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use nanomsg::{Protocol, Socket};
-use serde_json::{self, Map, Value};
+use serde_json::{self, Value};
 
 const BASE_URL: &'static str = "ipc:///tmp";
 const ADAPTER_MANAGER_URL: &'static str = "ipc:///tmp/gateway.addonManager";
@@ -101,8 +101,8 @@ pub enum PluginMessage {
         id: String,
         name: String,
         typ: String,
-        properties: Map<String, Value>,
-        actions: Map<String, Value>,
+        properties: HashMap<String, Property>,
+        actions: HashMap<String, Action>,
     },
     #[serde(rename_all = "camelCase")]
     HandleDeviceRemoved {
@@ -123,6 +123,11 @@ pub enum PluginMessage {
 pub struct Property {
     pub name: String,
     pub value: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Action {
+    pub name: String,
 }
 
 pub struct GatewayBridge {
@@ -221,9 +226,30 @@ fn to_io_error<E>(err: E) -> io::Error
 
 pub trait Device {
     fn set_property(&mut self, property: Property) -> Result<Property, io::Error>;
+
+    fn get_name(&self) -> String {
+        "Unknown Device".to_string()
+    }
+
+    fn get_type(&self) -> String {
+        "thing".to_string()
+    }
+
+    fn get_actions(&self) -> HashMap<String, Action> {
+        HashMap::new()
+    }
+
+    fn get_properties(&self) -> HashMap<String, Property> {
+        HashMap::new()
+    }
 }
 
-pub trait Adapter {
+pub trait Adapter<T:Device> {
+    fn get_name(&self) -> String {
+        "Unknown Adapter".to_string()
+    }
+    fn get_devices(&self) -> &HashMap<String, Box<T>>;
+
     fn start_pairing(&mut self) -> Result<(), io::Error>;
 
     fn cancel_pairing(&mut self) -> Result<(), io::Error>;
@@ -231,20 +257,22 @@ pub trait Adapter {
     fn set_property(&mut self, device_id: &str, property: Property) -> Result<Property, io::Error>;
 }
 
-pub struct Plugin {
+pub struct Plugin<D:Device, A:Adapter<D>> {
     id: String,
-    adapters: HashMap<String, Box<Adapter>>,
+    adapters: HashMap<String, Box<A>>,
     sender: Sender<PluginMessage>,
     receiver: Receiver<GatewayMessage>,
+    _marker: std::marker::PhantomData<D>,
 }
 
-impl Plugin {
-    pub fn new(id: &str, sender: Sender<PluginMessage>, receiver: Receiver<GatewayMessage>) -> Plugin {
+impl<D:Device, A:Adapter<D>> Plugin<D, A> {
+    pub fn new(id: &str, sender: Sender<PluginMessage>, receiver: Receiver<GatewayMessage>) -> Plugin<D, A> {
         Plugin {
             id: id.to_string(),
             sender: sender,
             receiver: receiver,
             adapters: HashMap::new(),
+            _marker: std::marker::PhantomData,
         }
     }
 
@@ -314,11 +342,30 @@ impl Plugin {
         }
     }
 
-    pub fn add_adapter(&mut self, adapter_id: &str, adapter: Box<Adapter>) {
+    pub fn add_adapter(&mut self, adapter_id: &str, adapter: Box<A>) {
         self.adapters.insert(adapter_id.to_string(), adapter);
     }
 
     pub fn run_forever(&mut self) -> Result<(), io::Error> {
+        for (adapter_id, adapter) in &self.adapters {
+            self.sender.send(PluginMessage::AddAdapter {
+                plugin_id: self.id.clone(),
+                adapter_id: adapter_id.clone(),
+                name: adapter.get_name()
+            });
+            for (device_id, device) in adapter.get_devices() {
+                self.sender.send(PluginMessage::HandleDeviceAdded {
+                    plugin_id: self.id.clone(),
+                    adapter_id: adapter_id.clone(),
+                    id: device_id.clone(),
+                    name: device.get_name(),
+                    typ: device.get_type(),
+                    actions: device.get_actions(),
+                    properties: device.get_properties(),
+                });
+            }
+        }
+
         loop {
             match self.receiver.try_recv() {
                 Ok(msg) => {
