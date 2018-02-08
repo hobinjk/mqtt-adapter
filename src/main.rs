@@ -13,9 +13,10 @@ use serde_json::Value;
 mod mqtt;
 mod gateway;
 
-use gateway::{Device, Adapter, Plugin, GatewayBridge, Property};
+use gateway::{Device, Adapter, Plugin, GatewayBridge, Property, PropertyDescription};
 
 struct MQTTDevice {
+    prop_descrs: HashMap<String, PropertyDescription>,
     props: HashMap<String, Value>,
     mqtt: mqtt::MQTT
 }
@@ -23,10 +24,22 @@ struct MQTTDevice {
 impl MQTTDevice {
     fn new(mqtt: mqtt::MQTT) -> MQTTDevice {
         let mut props = HashMap::new();
+        let mut prop_descrs = HashMap::new();
         props.insert("on".to_string(), Value::Bool(true));
+        prop_descrs.insert("on".to_string(), PropertyDescription {
+            name: "on".to_string(),
+            value: Value::Bool(true),
+            typ: "boolean".to_string(),
+            description: None,
+            unit: None,
+            min: None,
+            max: None,
+            visible: true,
+        });
 
         MQTTDevice {
             props: props,
+            prop_descrs: prop_descrs,
             mqtt: mqtt
         }
     }
@@ -42,15 +55,8 @@ impl Device for MQTTDevice {
         Ok(property)
     }
 
-    fn get_properties(&self) -> HashMap<String, Property> {
-        let mut props = HashMap::new();
-        for (name, value) in &self.props {
-            props.insert(name.clone(), Property {
-                name: name.clone(),
-                value: value.clone()
-            });
-        }
-        props
+    fn get_properties(&self) -> HashMap<String, PropertyDescription> {
+        self.prop_descrs.clone()
     }
 
     fn get_name(&self) -> String {
@@ -89,7 +95,7 @@ impl Adapter<MQTTDevice> for MQTTAdapter {
     }
 
     fn set_property(&mut self, device_id: &str, property: Property) -> Result<Property, io::Error> {
-        println!("set_property");
+        println!("set_property {} {:?}", device_id, property);
         match self.devices.get_mut(device_id) {
             Some(device) => device.set_property(property),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Device not found"))
@@ -110,11 +116,11 @@ fn main() {
     println!("con: {:?}", mqtt.send_connect().unwrap());
     println!("pub: {:?}", mqtt.publish_value("on", &Value::Bool(true)).unwrap());
 
-    let (mut gateway_bridge, msg_sender, msg_receiver) = GatewayBridge::new("mqtt");
+    let (mut gateway_bridge, msg_sender, msg_receiver) = GatewayBridge::new("mqtt-adapter");
     thread::spawn(move || {
         gateway_bridge.run_forever().unwrap();
     });
-    let mut plugin = Plugin::new("mqtt", msg_sender, msg_receiver);
+    let mut plugin = Plugin::new("mqtt", "mqtt-adapter", msg_sender, msg_receiver);
     plugin.add_adapter("mqtt-0", Box::new(MQTTAdapter::new("mqtt-0", mqtt)));
     plugin.run_forever().unwrap();
 }

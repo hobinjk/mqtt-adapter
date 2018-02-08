@@ -48,7 +48,8 @@ pub enum GatewayMessage {
         plugin_id: String,
         adapter_id: String,
         device_id: String,
-        property: Property,
+        property_name: String,
+        property_value: Value,
     },
     #[serde(rename_all = "camelCase")]
     StartPairing {
@@ -75,7 +76,7 @@ pub enum GatewayMessage {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(tag = "messageType", content = "data", rename_all = "camelCase")]
 pub enum PluginMessage {
     #[serde(rename_all = "camelCase")]
@@ -93,6 +94,7 @@ pub enum PluginMessage {
         plugin_id: String,
         adapter_id: String,
         name: String,
+        package_name: String,
     },
     #[serde(rename_all = "camelCase")]
     HandleDeviceAdded {
@@ -100,9 +102,10 @@ pub enum PluginMessage {
         adapter_id: String,
         id: String,
         name: String,
+        #[serde(rename = "type")]
         typ: String,
-        properties: HashMap<String, Property>,
-        actions: HashMap<String, Action>,
+        properties: HashMap<String, PropertyDescription>,
+        actions: HashMap<String, ActionDescription>,
     },
     #[serde(rename_all = "camelCase")]
     HandleDeviceRemoved {
@@ -119,6 +122,23 @@ pub enum PluginMessage {
     },
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PropertyDescription {
+    pub name: String,
+    pub value: Value,
+    #[serde(rename = "type")]
+    pub typ: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<String>,
+    pub visible: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Property {
     pub name: String,
@@ -126,7 +146,7 @@ pub struct Property {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Action {
+pub struct ActionDescription {
     pub name: String,
 }
 
@@ -152,57 +172,70 @@ impl GatewayBridge {
     }
 
     pub fn run_forever(&mut self) -> Result<(), io::Error> {
-        let mut socket = Socket::new(Protocol::Req)?;
-        let mut endpoint = socket.connect(ADAPTER_MANAGER_URL)?;
-        let req = PluginRegisterMessage::RegisterPlugin {
-            plugin_id: self.id.to_string()
-        };
-        socket.write_all(serde_json::to_string(&req)?.as_bytes())?;
-        let mut rep = String::new();
-        socket.read_to_string(&mut rep)?;
-        endpoint.shutdown()?;
-        println!("We got it! {}", rep);
-        let msg: GatewayRegisterMessage = serde_json::from_str(&rep)?;
-        // open a Req channel to adapterManager
-        // send {messageType: 'registerPlugin', data: { pluginId: id }}
-        // receives
-        // {
-        //  messageType: 'registerPluginReply',
-        //  data: {
-        //    pluginId: 'pluginId-string',
-        //    ipcBaseAddr: 'gateway.plugin.xxx',
-        //  },
-        //}
-        // connect to ipcBaseAddr as pair
-        // then handle everything
+        let ipc_base_addr = {
+            let mut socket = Socket::new(Protocol::Req)?;
+            let mut endpoint = socket.connect(ADAPTER_MANAGER_URL)?;
+            let req = PluginRegisterMessage::RegisterPlugin {
+                plugin_id: self.id.to_string()
+            };
+            socket.write_all(serde_json::to_string(&req)?.as_bytes())?;
+            let mut rep = String::new();
+            socket.read_to_string(&mut rep)?;
+            endpoint.shutdown()?;
+            println!("We got it! {}", rep);
+            let msg: GatewayRegisterMessage = serde_json::from_str(&rep)?;
+            // open a Req channel to adapterManager
+            // send {messageType: 'registerPlugin', data: { pluginId: id }}
+            // receives
+            // {
+            //  messageType: 'registerPluginReply',
+            //  data: {
+            //    pluginId: 'pluginId-string',
+            //    ipcBaseAddr: 'gateway.plugin.xxx',
+            //  },
+            //}
+            // connect to ipcBaseAddr as pair
+            // then handle everything
 
-        let ipc_base_addr = match msg {
-            GatewayRegisterMessage::RegisterPluginReply {plugin_id, ipc_base_addr} => {
-                if plugin_id != self.id {
-                    panic!("mismatched plugin id on channel")
-                }
-                ipc_base_addr
-            },
+            match msg {
+                GatewayRegisterMessage::RegisterPluginReply {plugin_id, ipc_base_addr} => {
+                    if plugin_id != self.id {
+                        panic!("mismatched plugin id on channel")
+                    }
+                    ipc_base_addr
+                },
+            }
         };
 
         let mut socket_pair = Socket::new(Protocol::Pair)?;
-        let mut endpoint_pair = socket_pair.connect(&format!("{}/{}", BASE_URL, &ipc_base_addr))?;
+        let addr = format!("{}/{}", BASE_URL, &ipc_base_addr);
+        socket_pair.set_receive_timeout(33)?;
+        println!("pair connect to {}", addr);
+        let mut endpoint_pair = socket_pair.connect(&addr)?;
+        thread::sleep(Duration::from_millis(33));
 
-        let mut buf = Vec::new();
 
         loop {
-            let read_status = socket.nb_read_to_end(&mut buf);
-            if read_status.is_ok() {
-                match serde_json::from_slice(&buf) {
-                    Ok(msg) => {
-                        self.msg_sender.send(msg).unwrap();
-                    },
-                    _ => {
+            let mut buf = Vec::new();
+            match socket_pair.read_to_end(&mut buf) {
+                Ok(_) => {
+                    match serde_json::from_slice(&buf) {
+                        Ok(msg) => {
+                            println!("yes recv {:?}", msg);
+                            self.msg_sender.send(msg).unwrap();
+                        },
+                        Err(e) => {
+                            println!("parse fail {:?}", e);
+                        }
                     }
+                },
+                Err(_) => {
                 }
             }
 
+
             if let Ok(msg_to_send) = self.msg_receiver.try_recv() {
+                println!("yes send {:?}", msg_to_send);
                 socket_pair.write_all(serde_json::to_string(&msg_to_send)?.as_bytes()).unwrap();
                 match msg_to_send {
                     PluginMessage::PluginUnloaded {..} => {
@@ -235,11 +268,11 @@ pub trait Device {
         "thing".to_string()
     }
 
-    fn get_actions(&self) -> HashMap<String, Action> {
+    fn get_actions(&self) -> HashMap<String, ActionDescription> {
         HashMap::new()
     }
 
-    fn get_properties(&self) -> HashMap<String, Property> {
+    fn get_properties(&self) -> HashMap<String, PropertyDescription> {
         HashMap::new()
     }
 }
@@ -258,7 +291,8 @@ pub trait Adapter<T:Device> {
 }
 
 pub struct Plugin<D:Device, A:Adapter<D>> {
-    id: String,
+    package_name: String,
+    plugin_id: String,
     adapters: HashMap<String, Box<A>>,
     sender: Sender<PluginMessage>,
     receiver: Receiver<GatewayMessage>,
@@ -266,9 +300,11 @@ pub struct Plugin<D:Device, A:Adapter<D>> {
 }
 
 impl<D:Device, A:Adapter<D>> Plugin<D, A> {
-    pub fn new(id: &str, sender: Sender<PluginMessage>, receiver: Receiver<GatewayMessage>) -> Plugin<D, A> {
+    pub fn new(package_name: &str, plugin_id: &str, sender: Sender<PluginMessage>,
+               receiver: Receiver<GatewayMessage>) -> Plugin<D, A> {
         Plugin {
-            id: id.to_string(),
+            package_name: package_name.to_string(),
+            plugin_id: plugin_id.to_string(),
             sender: sender,
             receiver: receiver,
             adapters: HashMap::new(),
@@ -277,19 +313,28 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
     }
 
     fn handle_msg(&mut self, msg: GatewayMessage) -> Result<(), io::Error> {
+        println!("handle_msg: {:?}", msg);
         match msg {
             GatewayMessage::SetProperty {
                 plugin_id,
                 adapter_id,
                 device_id,
-                property
+                property_name,
+                property_value,
             } => {
-                if plugin_id != self.id {
+                if plugin_id != self.plugin_id {
+                    println!("THAT AINT US {} != {}", plugin_id, self.plugin_id);
                     return Ok(())
                 }
 
                 let set_prop = match self.adapters.get_mut(&adapter_id) {
-                    Some(adapter) => adapter.set_property(&device_id, property),
+                    Some(adapter) => {
+                        let property = Property {
+                            name: property_name,
+                            value: property_value
+                        };
+                        adapter.set_property(&device_id, property)
+                    }
                     None => Err(io::Error::new(io::ErrorKind::Other, "Adapter not found"))
                 };
                 let prop = set_prop?;
@@ -311,7 +356,8 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                 adapter_id,
                 timeout: _,
             } => {
-                if plugin_id != self.id {
+                if plugin_id != self.plugin_id {
+                    println!("THAT AINT US {} != {}", plugin_id, self.plugin_id);
                     return Ok(())
                 }
 
@@ -324,7 +370,8 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                 plugin_id,
                 adapter_id,
             } => {
-                if plugin_id != self.id {
+                if plugin_id != self.plugin_id {
+                    println!("THAT AINT US {} != {}", plugin_id, self.plugin_id);
                     return Ok(())
                 }
 
@@ -349,13 +396,14 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
     pub fn run_forever(&mut self) -> Result<(), io::Error> {
         for (adapter_id, adapter) in &self.adapters {
             self.sender.send(PluginMessage::AddAdapter {
-                plugin_id: self.id.clone(),
+                plugin_id: self.plugin_id.clone(),
+                package_name: self.package_name.clone(),
                 adapter_id: adapter_id.clone(),
                 name: adapter.get_name()
             }).map_err(to_io_error)?;
             for (device_id, device) in adapter.get_devices() {
                 self.sender.send(PluginMessage::HandleDeviceAdded {
-                    plugin_id: self.id.clone(),
+                    plugin_id: self.plugin_id.clone(),
                     adapter_id: adapter_id.clone(),
                     id: device_id.clone(),
                     name: device.get_name(),
@@ -372,7 +420,9 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                     println!("recv: {:?}", msg);
                     self.handle_msg(msg)?;
                 },
-                _ => {}
+                _ => {
+                    thread::sleep(Duration::from_millis(33));
+                }
             }
         }
     }
