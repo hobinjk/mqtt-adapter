@@ -37,7 +37,6 @@ impl MQTT {
             username: Some(self.username.clone()),
             password: Some(self.password.clone()),
         }));
-        println!("{:?}", connect);
         self.writer.write_packet(&connect)?;
         self.writer.flush()?;
         self.reader.read_packet()
@@ -52,7 +51,6 @@ impl MQTT {
 			pid: Some(mqtt3::PacketIdentifier(10)),
 			payload: Arc::new(value.to_string().into_bytes())
 		}));
-		println!("{:?}", publish);
 		self.writer.write_packet(&publish)?;
 		self.writer.flush()?;
 		self.reader.read_packet()

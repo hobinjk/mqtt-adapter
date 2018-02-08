@@ -182,7 +182,6 @@ impl GatewayBridge {
             let mut rep = String::new();
             socket.read_to_string(&mut rep)?;
             endpoint.shutdown()?;
-            println!("We got it! {}", rep);
             let msg: GatewayRegisterMessage = serde_json::from_str(&rep)?;
             // open a Req channel to adapterManager
             // send {messageType: 'registerPlugin', data: { pluginId: id }}
@@ -210,7 +209,6 @@ impl GatewayBridge {
         let mut socket_pair = Socket::new(Protocol::Pair)?;
         let addr = format!("{}/{}", BASE_URL, &ipc_base_addr);
         socket_pair.set_receive_timeout(33)?;
-        println!("pair connect to {}", addr);
         let mut endpoint_pair = socket_pair.connect(&addr)?;
         thread::sleep(Duration::from_millis(33));
 
@@ -220,13 +218,8 @@ impl GatewayBridge {
             match socket_pair.read_to_end(&mut buf) {
                 Ok(_) => {
                     match serde_json::from_slice(&buf) {
-                        Ok(msg) => {
-                            println!("yes recv {:?}", msg);
-                            self.msg_sender.send(msg).unwrap();
-                        },
-                        Err(e) => {
-                            println!("parse fail {:?}", e);
-                        }
+                        Ok(msg) => self.msg_sender.send(msg).unwrap(),
+                        Err(e) => println!("parse fail {:?}", e),
                     }
                 },
                 Err(_) => {
@@ -235,7 +228,6 @@ impl GatewayBridge {
 
 
             if let Ok(msg_to_send) = self.msg_receiver.try_recv() {
-                println!("yes send {:?}", msg_to_send);
                 socket_pair.write_all(serde_json::to_string(&msg_to_send)?.as_bytes()).unwrap();
                 match msg_to_send {
                     PluginMessage::PluginUnloaded {..} => {
@@ -313,7 +305,6 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
     }
 
     fn handle_msg(&mut self, msg: GatewayMessage) -> Result<(), io::Error> {
-        println!("handle_msg: {:?}", msg);
         match msg {
             GatewayMessage::SetProperty {
                 plugin_id,
@@ -323,7 +314,6 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                 property_value,
             } => {
                 if plugin_id != self.plugin_id {
-                    println!("THAT AINT US {} != {}", plugin_id, self.plugin_id);
                     return Ok(())
                 }
 
@@ -357,7 +347,6 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                 timeout: _,
             } => {
                 if plugin_id != self.plugin_id {
-                    println!("THAT AINT US {} != {}", plugin_id, self.plugin_id);
                     return Ok(())
                 }
 
@@ -371,7 +360,6 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                 adapter_id,
             } => {
                 if plugin_id != self.plugin_id {
-                    println!("THAT AINT US {} != {}", plugin_id, self.plugin_id);
                     return Ok(())
                 }
 
@@ -417,7 +405,6 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
         loop {
             match self.receiver.try_recv() {
                 Ok(msg) => {
-                    println!("recv: {:?}", msg);
                     self.handle_msg(msg)?;
                 },
                 _ => {

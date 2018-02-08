@@ -48,7 +48,6 @@ impl MQTTDevice {
 
 impl Device for MQTTDevice {
     fn set_property(&mut self, property: Property) -> Result<Property, io::Error> {
-        println!("set_property {:?}", property);
         self.mqtt.publish_value(&property.name, &property.value)
             .map_err(|_| return io::Error::new(io::ErrorKind::Other, "mqtt3 error"))?;
         self.props.insert(property.name.clone(), property.value.clone());
@@ -113,8 +112,8 @@ impl Adapter<MQTTDevice> for MQTTAdapter {
 
 fn main() {
     let mut mqtt = mqtt::MQTT::new();
-    println!("con: {:?}", mqtt.send_connect().unwrap());
-    println!("pub: {:?}", mqtt.publish_value("on", &Value::Bool(true)).unwrap());
+    mqtt.send_connect().unwrap();
+    mqtt.publish_value("on", &Value::Bool(true)).unwrap();
 
     let (mut gateway_bridge, msg_sender, msg_receiver) = GatewayBridge::new("mqtt-adapter");
     thread::spawn(move || {
