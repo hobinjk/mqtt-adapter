@@ -10,6 +10,7 @@ use std::thread;
 
 use serde_json::Value;
 
+mod config;
 mod mqtt;
 mod gateway;
 
@@ -111,7 +112,8 @@ impl Adapter<MQTTDevice> for MQTTAdapter {
 }
 
 fn main() {
-    let mut mqtt = mqtt::MQTT::new();
+    let mut mqtt = mqtt::MQTT::new(config::MQTT_SERVER, config::MQTT_USERNAME,
+                                   config::MQTT_PASSWORD);
     mqtt.send_connect().unwrap();
     mqtt.publish_value("on", &Value::Bool(true)).unwrap();
 

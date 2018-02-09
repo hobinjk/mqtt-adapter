@@ -5,8 +5,6 @@ use std::io::{Write, BufReader, BufWriter};
 use mqtt3::{self, MqttRead, MqttWrite};
 use serde_json::Value;
 
-const ADAFRUIT_IO: &'static str = "io.adafruit.com:1883";
-
 pub struct MQTT {
     writer: BufWriter<TcpStream>,
     reader: BufReader<TcpStream>,
@@ -15,15 +13,15 @@ pub struct MQTT {
 }
 
 impl MQTT {
-    pub fn new() -> MQTT {
-        let stream = TcpStream::connect(ADAFRUIT_IO).unwrap();
+    pub fn new(server: &str, username: &str, password: &str) -> MQTT {
+        let stream = TcpStream::connect(server).unwrap();
         let reader = BufReader::new(stream.try_clone().unwrap());
         let writer = BufWriter::new(stream.try_clone().unwrap());
         MQTT {
             reader,
             writer,
-            username: "username".to_string(),
-            password: "ada-io-key".to_string()
+            username: username.to_string(),
+            password: password.to_string()
         }
     }
 
