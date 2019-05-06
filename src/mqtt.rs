@@ -41,16 +41,30 @@ impl MQTT {
     }
 
     pub fn publish_value(&mut self, prop: &str, value: &Value) -> Result<mqtt3::Packet, mqtt3::Error> {
-		let publish = mqtt3::Packet::Publish(Box::new(mqtt3::Publish {
-			dup: false,
-			qos: mqtt3::QoS::AtLeastOnce,
-			retain: false,
-			topic_name: format!("{}/feeds/{}", self.username, prop).to_owned(),
-			pid: Some(mqtt3::PacketIdentifier(10)),
-			payload: Arc::new(value.to_string().into_bytes())
-		}));
-		self.writer.write_packet(&publish)?;
-		self.writer.flush()?;
-		self.reader.read_packet()
+        let publish = mqtt3::Packet::Publish(Box::new(mqtt3::Publish {
+                dup: false,
+                qos: mqtt3::QoS::AtLeastOnce,
+                retain: false,
+                topic_name: format!("{}/feeds/{}", self.username, prop).to_owned(),
+                pid: Some(mqtt3::PacketIdentifier(10)),
+                payload: Arc::new(value.to_string().into_bytes())
+        }));
+        self.writer.write_packet(&publish)?;
+        self.writer.flush()?;
+        self.reader.read_packet()
+    }
+
+    pub fn publish_action(&mut self, name: &str) -> Result<mqtt3::Packet, mqtt3::Error> {
+        let publish = mqtt3::Packet::Publish(Box::new(mqtt3::Publish {
+                dup: false,
+                qos: mqtt3::QoS::AtLeastOnce,
+                retain: false,
+                topic_name: format!("{}/feeds/actions", self.username).to_owned(),
+                pid: Some(mqtt3::PacketIdentifier(10)),
+                payload: Arc::new(name.to_string().into_bytes())
+        }));
+        self.writer.write_packet(&publish)?;
+        self.writer.flush()?;
+        self.reader.read_packet()
     }
 }

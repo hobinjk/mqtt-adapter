@@ -14,10 +14,11 @@ mod config;
 mod mqtt;
 mod gateway;
 
-use gateway::{Device, Adapter, Plugin, GatewayBridge, Property, PropertyDescription};
+use gateway::{Device, Adapter, Plugin, GatewayBridge, Property, PropertyDescription, ActionDescription};
 
 struct MQTTDevice {
     prop_descrs: HashMap<String, PropertyDescription>,
+    action_descrs: HashMap<String, ActionDescription>,
     props: HashMap<String, Value>,
     mqtt: mqtt::MQTT
 }
@@ -37,10 +38,18 @@ impl MQTTDevice {
             max: None,
             visible: true,
         });
+        let mut action_descrs = HashMap::new();
+        action_descrs.insert("forward".to_string(), ActionDescription {
+            name: "forward".to_string(),
+        });
+        action_descrs.insert("backward".to_string(), ActionDescription {
+            name: "backward".to_string(),
+        });
 
         MQTTDevice {
             props: props,
             prop_descrs: prop_descrs,
+            action_descrs: action_descrs,
             mqtt: mqtt
         }
     }
@@ -55,8 +64,18 @@ impl Device for MQTTDevice {
         Ok(property)
     }
 
+    fn request_action(&mut self, name: String) -> Result<(), io::Error> {
+        self.mqtt.publish_action(&name)
+            .map_err(|_| return io::Error::new(io::ErrorKind::Other, "mqtt3 error"))?;
+        Ok(())
+    }
+
     fn get_properties(&self) -> HashMap<String, PropertyDescription> {
         self.prop_descrs.clone()
+    }
+
+    fn get_actions(&self) -> HashMap<String, ActionDescription> {
+        self.action_descrs.clone()
     }
 
     fn get_name(&self) -> String {
@@ -98,6 +117,14 @@ impl Adapter<MQTTDevice> for MQTTAdapter {
         println!("set_property {} {:?}", device_id, property);
         match self.devices.get_mut(device_id) {
             Some(device) => device.set_property(property),
+            None => return Err(io::Error::new(io::ErrorKind::Other, "Device not found"))
+        }
+    }
+
+    fn request_action(&mut self, device_id: &str, name: String) -> Result<(), io::Error> {
+        println!("request_action {} {}", device_id, name);
+        match self.devices.get_mut(device_id) {
+            Some(device) => device.request_action(name),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Device not found"))
         }
     }

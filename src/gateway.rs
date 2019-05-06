@@ -52,6 +52,15 @@ pub enum GatewayMessage {
         property_value: Value,
     },
     #[serde(rename_all = "camelCase")]
+    RequestAction {
+        plugin_id: String,
+        adapter_id: String,
+        device_id: String,
+        action_id: f64,
+        action_name: String,
+        input: Value,
+    },
+    #[serde(rename_all = "camelCase")]
     StartPairing {
         plugin_id: String,
         adapter_id: String,
@@ -145,7 +154,7 @@ pub struct Property {
     pub value: Value,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActionDescription {
     pub name: String,
 }
@@ -251,6 +260,7 @@ fn to_io_error<E>(err: E) -> io::Error
 
 pub trait Device {
     fn set_property(&mut self, property: Property) -> Result<Property, io::Error>;
+    fn request_action(&mut self, name: String) -> Result<(), io::Error>;
 
     fn get_name(&self) -> String {
         "Unknown Device".to_string()
@@ -280,6 +290,7 @@ pub trait Adapter<T:Device> {
     fn cancel_pairing(&mut self) -> Result<(), io::Error>;
 
     fn set_property(&mut self, device_id: &str, property: Property) -> Result<Property, io::Error>;
+    fn request_action(&mut self, device_id: &str, name: String) -> Result<(), io::Error>;
 }
 
 pub struct Plugin<D:Device, A:Adapter<D>> {
@@ -334,6 +345,25 @@ impl<D:Device, A:Adapter<D>> Plugin<D, A> {
                     device_id,
                     property: prop
                 }).map_err(to_io_error)
+            },
+            GatewayMessage::RequestAction {
+                plugin_id,
+                adapter_id,
+                device_id,
+                action_id: _action_id,
+                action_name,
+                input: _input,
+            } => {
+                if plugin_id != self.plugin_id {
+                    return Ok(())
+                }
+
+                match self.adapters.get_mut(&adapter_id) {
+                    Some(adapter) => {
+                        return adapter.request_action(&device_id, action_name);
+                    }
+                    None => Err(io::Error::new(io::ErrorKind::Other, "Adapter not found"))
+                }
             },
             GatewayMessage::UnloadPlugin {..} => {
                 Ok(())
