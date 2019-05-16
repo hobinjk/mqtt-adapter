@@ -28,7 +28,7 @@ impl MQTT {
     pub fn send_connect(&mut self) -> Result<mqtt3::Packet, mqtt3::Error> {
         let connect = mqtt3::Packet::Connect(Box::new(mqtt3::Connect {
             protocol: mqtt3::Protocol::MQTT(4),
-            keep_alive: 30,
+            keep_alive: 65535, // TODO properly fix
             client_id: "rust-mq-example-pub".to_string(),
             clean_session: true,
             last_will: None,
